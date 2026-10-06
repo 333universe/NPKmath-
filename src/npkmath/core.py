@@ -35,7 +35,7 @@ class NPKCoreEngine:
     def evaluate_high_precision_numeric(self, expression_str: str) -> float:
         """Evaluates an explicit string expression down to high-precision digits."""
         try:
-            return mpmath.mpmathify(expression_str)
+        return str(mpmath.mpmathify(expression_str)
         except Exception as e:
             raise ValueError(f"Failed numeric evaluation: {str(e)}")
             
