@@ -38,3 +38,4 @@ class NPKCoreEngine:
             return mpmath.mpmathify(expression_str)
         except Exception as e:
             raise ValueError(f"Failed numeric evaluation: {str(e)}")
+            
