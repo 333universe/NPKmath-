@@ -1,209 +1,120 @@
 """
-NPKmath Core Engine
-Executes symbolic identities, arbitrary-precision validations, 
-interval arithmetic, physical dimension auditing, and matrix operations.
+NPKmath Agent Engine
+Handles autonomous multi-turn evaluation loops and runtime verification cycles.
 """
 import time
-import sympy as sp
-import mpmath as mp
-from typing import Dict, Tuple, Optional, List, Any
+from typing import Dict, List, Any
 
-from .sieve import GoldenSieve
-from .ledger import SourceLedger
+from npkmath.core import NPKCoreEngine
 
 
-class NPKCoreEngine:
+class NPKAutonomousAgent:
     def __init__(self, precision: int = 120):
-        # Configure global high-precision arithmetic thresholds
-        mp.mp.dps = precision
-        self.sieve = GoldenSieve()
-        self.ledger = SourceLedger()
-        self.n_points = 12
+        # Instantiate the main evaluation layer (which includes the sieve and ledger)
+        self.engine = NPKCoreEngine(precision=precision)
+        self.execution_history: List[Dict[str, Any]] = []
 
-    def evaluate_symbolic_equality(self, expr1_str: str, expr2_str: str) -> bool:
-        """Fallback check mapping algebraic identities to backward-compatible test hooks."""
-        try:
-            L = self.sieve.parse_expression(expr1_str)
-            R = self.sieve.parse_expression(expr2_str)
-            return bool(sp.simplify(L - R) == 0)
-        except Exception:
-            return False
-
-    def evaluate_high_precision_numeric(self, expr: str) -> float:
-        """Evaluate a numeric expression and return a high-precision float."""
-        try:
-            parsed = self.sieve.parse_expression(expr)
-            with mp.workdps(max(50, 80)):
-                return float(sp.N(parsed, 50))
-        except Exception as exc:
-            raise ValueError(f"Unable to evaluate expression: {expr}") from exc
-
-    # ------------------------------------------------------------- Matrix Operations
-    def matrix_verify(self, matrix_a: List[List[str]], matrix_b: List[List[str]], operation: str) -> dict:
+    def process_claim_cycle(self, claim_id: str, claim_type: str, data: Dict[str, str]) -> Dict[str, Any]:
         """
-        Validates linear algebra operations, properties, and invariants.
-        Supported Operations:
-          'equality'    : Proves if Matrix A equals Matrix B element-wise.
-          'invertible'  : Proves if Matrix A is invertible (det != 0).
-          'orthogonal'  : Proves if Matrix A satisfies A^T * A = I.
-          'rank'        : Returns the structural rank profile of Matrix A.
+        Runs an autonomous evaluation loop iteration on an incoming claim packet.
+        Supported claim types:
+          - symbolic / identity: requires expr1 and expr2 or lhs and rhs
+          - numeric / value: requires expression and optionally claimed
+          - matrix: requires matrix_a, matrix_b, operation
         """
+        start_time = time.perf_counter()
+        verdict = "REFUTED"
+        detail = None
+
         try:
-            # Parse row-nested string entries into SymPy Matrix instances
-            mA = sp.Matrix([[self.sieve.parse_expression(str(cell)) for cell in row] for row in matrix_a])
-            
-            if operation == "equality":
-                mB = sp.Matrix([[self.sieve.parse_expression(str(cell)) for cell in row] for row in matrix_b])
-                if mA.shape != mB.shape:
-                    return {"status": "REFUTED", "detail": f"Dimension mismatch: {mA.shape} vs {mB.shape}"}
-                diff = sp.simplify(mA - mB)
-                is_equal = diff.is_zero_matrix
-                return {
-                    "status": "PROVED" if is_equal else "REFUTED",
-                    "detail": "Matrices are element-wise identical" if is_equal else "Matrices possess non-zero element variations"
-                }
-                
-            elif operation == "invertible":
-                if not mA.is_square:
-                    return {"status": "REFUTED", "detail": "Non-square matrices are inherently non-invertible"}
-                det = sp.simplify(mA.det())
-                is_nonzero = (det != 0)
-                return {
-                    "status": "PROVED" if is_nonzero else "REFUTED",
-                    "detail": f"Matrix is invertible, det = {sp.sstr(det)}" if is_nonzero else "Matrix is singular, det = 0"
-                }
-                
-            elif operation == "orthogonal":
-                if not mA.is_square:
-                    return {"status": "REFUTED", "detail": "Orthogonal matrices must be square"}
-                identity = sp.eye(mA.rows)
-                diff = sp.simplify((mA.T * mA) - identity)
-                is_ortho = diff.is_zero_matrix
-                return {
-                    "status": "PROVED" if is_ortho else "REFUTED",
-                    "detail": "Satisfies orthogonal matrix properties (A^T * A = I)" if is_ortho else "Fails orthogonal transpose balance"
-                }
-                
-            elif operation == "rank":
-                rk = mA.rank()
-                return {"status": "VERIFIED", "detail": f"Matrix rank structural evaluation yielded rank calculation: {rk}"}
-                
+            if claim_type in {"symbolic", "identity"}:
+                expr1 = data.get("expr1") or data.get("lhs", "")
+                expr2 = data.get("expr2") or data.get("rhs", "")
+
+                if not expr1 or not expr2:
+                    verdict = "UNKNOWN_CLAIM_TYPE"
+                    self.engine.ledger.record_verdict(False)
+                elif self.engine.sieve.pre_filter_claim(expr1) and self.engine.sieve.pre_filter_claim(expr2):
+                    is_valid = self.engine.evaluate_symbolic_equality(expr1, expr2)
+                    verdict = "PROVED" if is_valid else "REFUTED"
+                    detail = f"symbolic equality check for {expr1} == {expr2}"
+                    self.engine.ledger.record_verdict(is_valid)
+                else:
+                    verdict = "REJECTED_BY_SIEVE"
+                    detail = "symbolic claim failed the sieve pre-filter"
+                    self.engine.ledger.record_verdict(False)
+
+            elif claim_type in {"numeric", "value"}:
+                expression = data.get("expression") or data.get("expr", "")
+                claimed = data.get("claimed")
+
+                if not expression:
+                    verdict = "UNKNOWN_CLAIM_TYPE"
+                    self.engine.ledger.record_verdict(False)
+                elif not self.engine.sieve.pre_filter_claim(expression):
+                    verdict = "REJECTED_BY_SIEVE"
+                    detail = "numeric claim failed the sieve pre-filter"
+                    self.engine.ledger.record_verdict(False)
+                else:
+                    if claimed is not None:
+                        result = self.engine.value(expression, str(claimed))
+                        verdict = result["status"]
+                        detail = result["detail"]
+                        self.engine.ledger.record_verdict(result["status"] in {"PROVED", "VERIFIED", "SUPPORTED"})
+                    else:
+                        numeric_value = self.engine.evaluate_high_precision_numeric(expression)
+                        verdict = "VERIFIED"
+                        detail = str(numeric_value)
+                        self.engine.ledger.record_verdict(True)
+
+            elif claim_type == "matrix":
+                matrix_a = data.get("matrix_a", [])
+                matrix_b = data.get("matrix_b", [])
+                operation = data.get("operation", "rank")
+
+                if not matrix_a:
+                    verdict = "UNKNOWN_CLAIM_TYPE"
+                    self.engine.ledger.record_verdict(False)
+                else:
+                    result = self.engine.matrix_verify(matrix_a, matrix_b, operation)
+                    verdict = result["status"]
+                    detail = result["detail"]
+                    self.engine.ledger.record_verdict(verdict in {"PROVED", "VERIFIED", "SUPPORTED"})
+
             else:
-                return {"status": "ILL_FORMED", "detail": f"Unsupported matrix operation flag: {operation}"}
-                
+                verdict = "UNKNOWN_CLAIM_TYPE"
+                detail = f"Unsupported claim type: {claim_type}"
+                self.engine.ledger.record_verdict(False)
+
         except Exception as e:
-            return {"status": "ILL_FORMED", "detail": f"Matrix transformation engine error: {str(e)}"}
+            verdict = "ERROR_RUNTIME_EXCEPTION"
+            detail = str(e)
+            self.engine.ledger.record_verdict(False)
 
-    # ------------------------------------------------------------------ identity
-    def identity(self, lhs: str, rhs: str, domain: Optional[Dict[str, Tuple[float, float]]] = None) -> dict:
-        """Determines if LHS == RHS over real inputs using symbolic cancelation and high-precision sign sweeps."""
-        try:
-            L = self.sieve.parse_expression(lhs)
-            R = self.sieve.parse_expression(rhs)
-            d = L - R
-            syms = sorted(d.free_symbols, key=str)
-            
-            if not syms:
-                if sp.simplify(d) == 0:
-                    return {"status": "PROVED", "detail": "exact: the difference simplifies to 0"}
-                if abs(sp.N(d, 60)) > sp.Float(10) ** -40:
-                    return {"status": "REFUTED", "detail": f"lhs - rhs = {sp.N(d, 12)}"}
-                return {"status": "SUPPORTED", "detail": "agrees to 40 digits (not proved symbolically)"}
+        execution_time_ms = (time.perf_counter() - start_time) * 1000
+        ledger_snapshot = self.engine.ledger.get_summary()
 
-            try:
-                dc = sp.cancel(d)
-            except Exception:
-                dc = d
-            if dc == 0:
-                return {"status": "PROVED", "detail": "exact: the rational difference cancels to 0"}
+        # Build execution packet telemetry
+        result_packet = {
+            "claim_id": claim_id,
+            "verdict": verdict,
+            "detail": detail,
+            "execution_time_ms": round(execution_time_ms, 3),
+            "current_ledger_reliability": ledger_snapshot["reliability_percentage"],
+            "total_processed": ledger_snapshot["total_processed"],
+        }
 
-            # High-precision numeric failure checks
-            DIGITS, TOL = 120, mp.mpf(10) ** -90
-            with mp.workdps(DIGITS):
-                fL = sp.lambdify(syms, L, modules="mpmath")
-                fR = sp.lambdify(syms, R, modules="mpmath")
+        self.execution_history.append(result_packet)
+        return result_packet
 
-                def first_failure(dom, signed):
-                    n_pts = max(self.n_points, 2 ** len(syms)) if signed else self.n_points
-                    import random
-                    rng = random.Random(0)
-                    for i in range(n_pts):
-                        pt = []
-                        for k, s_ in enumerate(syms):
-                            lo, hi = dom.get(str(s_), (0.1, 3.0))
-                            v = mp.mpf(lo) + (mp.mpf(hi) - mp.mpf(lo)) * mp.mpf(rng.getrandbits(420)) / mp.mpf(2) ** 420
-                            neg = ((i >> k) & 1) if i < 2 ** len(syms) else (rng.random() < 0.5)
-                            pt.append(-v if (signed and neg) else v)
-                        a_, b_ = fL(*pt), fR(*pt)
-                        if abs(a_ - b_) > TOL * max(1, abs(a_), abs(b_)):
-                            return f"lhs-rhs = {mp.nstr(a_ - b_, 6)}"
-                    return None
+    def run_batch_pipeline(self, claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Executes a batch collection of mathematical claims sequentially."""
+        results = []
+        for claim in claims:
+            c_id = claim.get("id", "unknown")
+            c_type = claim.get("type", "numeric")
+            c_data = claim.get("data", {})
 
-                fail = first_failure(domain or {}, signed=False)
-                if fail:
-                    return {"status": "REFUTED", "detail": f"counterexample at {fail}"}
-                if domain is None:
-                    fail = first_failure({}, signed=True)
-                    if fail:
-                        return {"status": "CONDITIONAL", "detail": f"holds for positive inputs only; fails at {fail}"}
-
-            if sp.simplify(d) == 0 or sp.simplify(sp.expand_trig(d)) == 0:
-                return {"status": "PROVED", "detail": "symbolic: the difference simplifies to 0"}
-            return {"status": "SUPPORTED", "detail": f"agrees to 90 digits at random points"}
-        except Exception as e:
-            return {"status": "ILL_FORMED", "detail": str(e)}
-
-    # ------------------------------------------------------------------ value
-    def value(self, expr: str, claimed: str) -> dict:
-        """Evaluates math strings down to arbitrary precision digits to check precision shortfalls."""
-        try:
-            decimals = len(claimed.split(".")) if "." in claimed else 0
-            with mp.workdps(max(50, decimals + 30)):
-                v = mp.mpmathify(str(sp.N(self.sieve.parse_expression(expr), decimals + 40)))
-                tol = mp.mpf(10) ** (-decimals) / 2
-                err = abs(v - mp.mpf(claimed))
-                if err <= tol * (1 + mp.mpf(10) ** -15):
-                    return {"status": "VERIFIED", "detail": f"matches claimed {decimals} decimals"}
-                return {"status": "REFUTED", "detail": f"error {mp.nstr(err, 3)}"}
-        except Exception as e:
-            return {"status": "ILL_FORMED", "detail": str(e)}
-
-    # ------------------------------------------------------------------ bound (interval arithmetic)
-    def exceeds(self, expr: str, var: str, lo: float, hi: float, c: str) -> dict:
-        """Proves if bounded functions exceed a specific limit using interval branch-and-bound logic."""
-        try:
-            x = sp.Symbol(var)
-            e = self.sieve.parse_expression(expr).subs(sp.GoldenRatio, (1 + sp.sqrt(5)) / 2)
-            iv = mp.iv
-            ns = {n: getattr(iv, n) for n in ("sin", "cos", "tan", "exp", "log", "sqrt") if hasattr(iv, n)}
-            ns.update({"Abs": abs, "pi": iv.pi, "e": iv.e, "mpf": iv.mpf})
-            
-            f_iv = sp.lambdify(x, e, modules=[ns, "mpmath"])
-            f_pt = sp.lambdify(x, e, modules="mpmath")
-            c_val = mp.mpf(str(c))
-            lo_val, hi_val = mp.mpf(lo), mp.mpf(hi)
-
-            def upper(a, b):
-                r = f_iv(iv.mpf([a, b]))
-                return max(abs(r.a), abs(r.b)) if hasattr(r, "a") else abs(r)
-
-            if upper(lo_val, hi_val) <= c_val:
-                return {"status": "REFUTED", "detail": "proved by interval arithmetic bounds"}
-
-            stack, nodes, width0 = [(lo_val, hi_val)], 0, hi_val - lo_val
-            while stack and nodes < 4000:
-                a, b = stack.pop()
-                nodes += 1
-                if upper(a, b) <= c_val:
-                    continue
-                m = (a + b) / 2
-                fm = abs(f_pt(m))
-                if fm > c_val:
-                    return {"status": "PROVED", "detail": f"witness found at x = {mp.nstr(m, 6)}"}
-                if (b - a) < width0 * mp.mpf(10) ** -14:
-                    continue
-                stack.extend([(a, m), (m, b)])
-            return {"status": "REFUTED", "detail": "bounded successfully everywhere"}
-        except Exception as e:
-            return {"status": "ILL_FORMED", "detail": str(e)}
-
+            outcome = self.process_claim_cycle(c_id, c_type, c_data)
+            results.append(outcome)
+        return results
