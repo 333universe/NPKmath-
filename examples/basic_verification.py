@@ -1,91 +1,120 @@
 """
-NPKmath Verification Playbook
-Executable standalone workflow verifying production engine identity, value, 
-and matrix calculation loops dynamically.
+NPKmath Agent Engine
+Handles autonomous multi-turn evaluation loops and runtime verification cycles.
 """
-from npkmath.agent import NPKAutonomousAgent
+import time
+from typing import Dict, List, Any
 
-def main():
-    print("==================================================")
-    print("⚡ Initializing NPKmath Production Agent Loop...")
-    print("==================================================")
-    
-    # Instantiate the agent with standard high-precision parameters
-    agent = NPKAutonomousAgent(precision=100)
-    
-    # Set up mock mathematical validation packets containing our new modules
-    mock_claims = [
-        {
-            "id": "CLAIM-001",
-            "type": "identity",
-            "data": {
-                "lhs": "sin(x)**2 + cos(x)**2",
-                "rhs": "1",
-                "source": "automated-trig-suite"
-            }
-        },
-        {
-            "id": "CLAIM-002",
-            "type": "value",
-            "data": {
-                "expr": "pi",
-                "claimed": "3.14159",
-                "source": "approximations-log"
-            }
-        },
-        {
-            "id": "CLAIM-003",
-            "type": "dimensions",
-            "data": {
-                "equation": "F = m*a",
-                "dims": {"F": "M L T^-2", "m": "M", "a": "L T^-2"},
-                "source": "physics-unit-audit"
-            }
-        },
-        {
-            "id": "CLAIM-004",
-            "type": "matrix",  # Direct integration test for our linear algebra engine extension
-            "data": {
-                "matrix_a": [["1", "2"], ["2", "4"]],
-                "matrix_b": [],
-                "operation": "rank",
-                "source": "linear-algebra-check"
-            }
+from npkmath.core import NPKCoreEngine
+
+
+class NPKAutonomousAgent:
+    def __init__(self, precision: int = 120):
+        # Instantiate the main evaluation layer (which includes the sieve and ledger)
+        self.engine = NPKCoreEngine(precision=precision)
+        self.execution_history: List[Dict[str, Any]] = []
+
+    def process_claim_cycle(self, claim_id: str, claim_type: str, data: Dict[str, str]) -> Dict[str, Any]:
+        """
+        Runs an autonomous evaluation loop iteration on an incoming claim packet.
+        Supported claim types:
+          - symbolic / identity: requires expr1 and expr2 or lhs and rhs
+          - numeric / value: requires expression and optionally claimed
+          - matrix: requires matrix_a, matrix_b, operation
+        """
+        start_time = time.perf_counter()
+        verdict = "REFUTED"
+        detail = None
+
+        try:
+            if claim_type in {"symbolic", "identity"}:
+                expr1 = data.get("expr1") or data.get("lhs", "")
+                expr2 = data.get("expr2") or data.get("rhs", "")
+
+                if not expr1 or not expr2:
+                    verdict = "UNKNOWN_CLAIM_TYPE"
+                    self.engine.ledger.record_verdict(False)
+                elif self.engine.sieve.pre_filter_claim(expr1) and self.engine.sieve.pre_filter_claim(expr2):
+                    is_valid = self.engine.evaluate_symbolic_equality(expr1, expr2)
+                    verdict = "PROVED" if is_valid else "REFUTED"
+                    detail = f"symbolic equality check for {expr1} == {expr2}"
+                    self.engine.ledger.record_verdict(is_valid)
+                else:
+                    verdict = "REJECTED_BY_SIEVE"
+                    detail = "symbolic claim failed the sieve pre-filter"
+                    self.engine.ledger.record_verdict(False)
+
+            elif claim_type in {"numeric", "value"}:
+                expression = data.get("expression") or data.get("expr", "")
+                claimed = data.get("claimed")
+
+                if not expression:
+                    verdict = "UNKNOWN_CLAIM_TYPE"
+                    self.engine.ledger.record_verdict(False)
+                elif not self.engine.sieve.pre_filter_claim(expression):
+                    verdict = "REJECTED_BY_SIEVE"
+                    detail = "numeric claim failed the sieve pre-filter"
+                    self.engine.ledger.record_verdict(False)
+                else:
+                    if claimed is not None:
+                        result = self.engine.value(expression, str(claimed))
+                        verdict = result["status"]
+                        detail = result["detail"]
+                        self.engine.ledger.record_verdict(result["status"] in {"PROVED", "VERIFIED", "SUPPORTED"})
+                    else:
+                        numeric_value = self.engine.evaluate_high_precision_numeric(expression)
+                        verdict = "VERIFIED"
+                        detail = str(numeric_value)
+                        self.engine.ledger.record_verdict(True)
+
+            elif claim_type == "matrix":
+                matrix_a = data.get("matrix_a", [])
+                matrix_b = data.get("matrix_b", [])
+                operation = data.get("operation", "rank")
+
+                if not matrix_a:
+                    verdict = "UNKNOWN_CLAIM_TYPE"
+                    self.engine.ledger.record_verdict(False)
+                else:
+                    result = self.engine.matrix_verify(matrix_a, matrix_b, operation)
+                    verdict = result["status"]
+                    detail = result["detail"]
+                    self.engine.ledger.record_verdict(verdict in {"PROVED", "VERIFIED", "SUPPORTED"})
+
+            else:
+                verdict = "UNKNOWN_CLAIM_TYPE"
+                detail = f"Unsupported claim type: {claim_type}"
+                self.engine.ledger.record_verdict(False)
+
+        except Exception as e:
+            verdict = "ERROR_RUNTIME_EXCEPTION"
+            detail = str(e)
+            self.engine.ledger.record_verdict(False)
+
+        execution_time_ms = (time.perf_counter() - start_time) * 1000
+        ledger_snapshot = self.engine.ledger.get_summary()
+
+        # Build execution packet telemetry
+        result_packet = {
+            "claim_id": claim_id,
+            "verdict": verdict,
+            "detail": detail,
+            "execution_time_ms": round(execution_time_ms, 3),
+            "current_ledger_reliability": ledger_snapshot["reliability_percentage"],
+            "total_processed": ledger_snapshot["total_processed"],
         }
-    ]
-    
-    print(f"📥 Feeding {len(mock_claims)} core test claims into agent pipeline...")
-    
-    # Process the pipeline via the structural routing loop
-    for claim in mock_claims:
-        c_id = claim["id"]
-        c_type = claim["type"]
-        c_data = claim["data"]
-        
-        # Matrix features hit the core directly, others map through standard agent routing
-        if c_type == "matrix":
-            res = agent.engine.matrix_verify(c_data["matrix_a"], c_data["matrix_b"], c_data["operation"])
-            verdict = res["status"]
-            detail = res["detail"]
-            exec_time = 0.5  # placeholder execution duration read
-        else:
-            res = agent.process_claim_cycle(c_id, c_type, c_data)
-            verdict = res["verdict"]
-            detail = res["detail"]
-            exec_time = res["execution_time_ms"]
-            
-        print(f"--------------------------------------------------")
-        print(f"▪️ Claim ID : {c_id} ({c_type.upper()})")
-        print(f"▪️ Verdict  : {verdict}")
-        print(f"▪️ Detail   : {detail}")
-            
-    print("==================================================")
-    print("📈 Final Bayesian Source Ledger Assessment:")
-    # Pull statistical snapshot tracking records processed in this runtime cycle
-    for source, t, f, o, r in agent.engine.ledger.table():
-        print(f"  {source:<25} Verified: {t} | Flagged: {f} | Reliability: {r:.2%}")
-    print("==================================================")
 
-if __name__ == "__main__":
-    main()
-        
+        self.execution_history.append(result_packet)
+        return result_packet
+
+    def run_batch_pipeline(self, claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Executes a batch collection of mathematical claims sequentially."""
+        results = []
+        for claim in claims:
+            c_id = claim.get("id", "unknown")
+            c_type = claim.get("type", "numeric")
+            c_data = claim.get("data", {})
+
+            outcome = self.process_claim_cycle(c_id, c_type, c_data)
+            results.append(outcome)
+        return results
