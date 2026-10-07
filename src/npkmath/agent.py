@@ -81,3 +81,4 @@ class NPKAutonomousAgent:
             outcome = self.process_claim_cycle(c_id, c_type, c_data)
             results.append(outcome)
         return results
+            
