@@ -1,27 +1,31 @@
 """
 NPKmath Test Suite: Core Engine
-Verifies symbolic simplification and arbitrary-precision numeric calculations.
+Verifies production mathematical verification endpoints.
 """
 import pytest
 from npkmath.core import NPKCoreEngine
 
-def test_symbolic_equality_success():
+def test_production_identity_proved():
     engine = NPKCoreEngine()
-    # Verifies algebraic identity expansions: (x-y)(x+y) equals x^2 - y^2
-    assert engine.evaluate_symbolic_equality("x**2 - y**2", "(x - y)*(x + y)") is True
-    # Verifies standard trigonometric identity: sin^2(x) + cos^2(x) equals 1
-    assert engine.evaluate_symbolic_equality("sin(x)**2 + cos(x)**2", "1") is True
+    # Verifies standard algebraic identity proved exactly
+    res = engine.identity("sin(x)**2 + cos(x)**2", "1")
+    assert res["status"] == "PROVED"
 
-def test_symbolic_equality_failure():
+def test_production_identity_refuted():
     engine = NPKCoreEngine()
-    # Unequal mathematical statements must return False instead of crashing
-    assert engine.evaluate_symbolic_equality("x + 1", "x + 2") is False
+    # Verifies failing algebraic statement gets caught and refuted
+    res = engine.identity("x + 1", "x + 2")
+    assert res["status"] == "REFUTED"
 
-def test_high_precision_numeric_evaluation():
-    engine = NPKCoreEngine(precision=50)
-    # Verifies that mpmath can evaluate expressions down to high-precision string decimals
-    result = engine.evaluate_high_precision_numeric("sqrt(2)")
-    # Check that it returned a valid string containing the high-precision decimal expansion of root 2
-    assert isinstance(result, str)
-    assert result.startswith("1.4142")
-  
+def test_production_value_verification():
+    engine = NPKCoreEngine()
+    # Verifies decimal value approximation matching to decimal points
+    res = engine.value("pi", "3.14159")
+    assert res["status"] == "VERIFIED"
+
+def test_production_exceeds_bounds():
+    engine = NPKCoreEngine()
+    # Verifies that interval checking refutes an impossible bound condition
+    res = engine.exceeds("sin(x)", "x", 0, 1, "2.0")
+    assert res["status"] == "REFUTED"
+    
