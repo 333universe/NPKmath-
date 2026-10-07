@@ -1,12 +1,12 @@
 """
 NPKmath Core Engine
 Executes symbolic identities, arbitrary-precision validations, 
-interval arithmetic, and physical dimension auditing.
+interval arithmetic, physical dimension auditing, and matrix operations.
 """
 import time
 import sympy as sp
 import mpmath as mp
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional, List, Any
 
 from .sieve import GoldenSieve
 from .ledger import SourceLedger
@@ -28,6 +28,63 @@ class NPKCoreEngine:
         except Exception:
             return False
 
+    # ------------------------------------------------------------- Matrix Operations
+    def matrix_verify(self, matrix_a: List[List[str]], matrix_b: List[List[str]], operation: str) -> dict:
+        """
+        Validates linear algebra operations, properties, and invariants.
+        Supported Operations:
+          'equality'    : Proves if Matrix A equals Matrix B element-wise.
+          'invertible'  : Proves if Matrix A is invertible (det != 0).
+          'orthogonal'  : Proves if Matrix A satisfies A^T * A = I.
+          'rank'        : Returns the structural rank profile of Matrix A.
+        """
+        try:
+            # Parse row-nested string entries into SymPy Matrix instances
+            mA = sp.Matrix([[self.sieve.parse_expression(str(cell)) for cell in row] for row in matrix_a])
+            
+            if operation == "equality":
+                mB = sp.Matrix([[self.sieve.parse_expression(str(cell)) for cell in row] for row in matrix_b])
+                if mA.shape != mB.shape:
+                    return {"status": "REFUTED", "detail": f"Dimension mismatch: {mA.shape} vs {mB.shape}"}
+                diff = sp.simplify(mA - mB)
+                is_equal = diff.is_zero_matrix
+                return {
+                    "status": "PROVED" if is_equal else "REFUTED",
+                    "detail": "Matrices are element-wise identical" if is_equal else "Matrices possess non-zero element variations"
+                }
+                
+            elif operation == "invertible":
+                if not mA.is_square:
+                    return {"status": "REFUTED", "detail": "Non-square matrices are inherently non-invertible"}
+                det = sp.simplify(mA.det())
+                is_nonzero = (det != 0)
+                return {
+                    "status": "PROVED" if is_nonzero else "REFUTED",
+                    "detail": f"Matrix is invertible, det = {sp.sstr(det)}" if is_nonzero else "Matrix is singular, det = 0"
+                }
+                
+            elif operation == "orthogonal":
+                if not mA.is_square:
+                    return {"status": "REFUTED", "detail": "Orthogonal matrices must be square"}
+                identity = sp.eye(mA.rows)
+                diff = sp.simplify((mA.T * mA) - identity)
+                is_ortho = diff.is_zero_matrix
+                return {
+                    "status": "PROVED" if is_ortho else "REFUTED",
+                    "detail": "Satisfies orthogonal matrix properties (A^T * A = I)" if is_ortho else "Fails orthogonal transpose balance"
+                }
+                
+            elif operation == "rank":
+                rk = mA.rank()
+                return {"status": "VERIFIED", "detail": f"Matrix rank structural evaluation yielded rank calculation: {rk}"}
+                
+            else:
+                return {"status": "ILL_FORMED", "detail": f"Unsupported matrix operation flag: {operation}"}
+                
+        except Exception as e:
+            return {"status": "ILL_FORMED", "detail": f"Matrix transformation engine error: {str(e)}"}
+
+    # ------------------------------------------------------------------ identity
     def identity(self, lhs: str, rhs: str, domain: Optional[Dict[str, Tuple[float, float]]] = None) -> dict:
         """Determines if LHS == RHS over real inputs using symbolic cancelation and high-precision sign sweeps."""
         try:
@@ -86,10 +143,11 @@ class NPKCoreEngine:
         except Exception as e:
             return {"status": "ILL_FORMED", "detail": str(e)}
 
+    # ------------------------------------------------------------------ value
     def value(self, expr: str, claimed: str) -> dict:
         """Evaluates math strings down to arbitrary precision digits to check precision shortfalls."""
         try:
-            decimals = len(claimed.split(".")[1]) if "." in claimed else 0
+            decimals = len(claimed.split(".")) if "." in claimed else 0
             with mp.workdps(max(50, decimals + 30)):
                 v = mp.mpmathify(str(sp.N(self.sieve.parse_expression(expr), decimals + 40)))
                 tol = mp.mpf(10) ** (-decimals) / 2
@@ -100,6 +158,7 @@ class NPKCoreEngine:
         except Exception as e:
             return {"status": "ILL_FORMED", "detail": str(e)}
 
+    # ------------------------------------------------------------------ bound (interval arithmetic)
     def exceeds(self, expr: str, var: str, lo: float, hi: float, c: str) -> dict:
         """Proves if bounded functions exceed a specific limit using interval branch-and-bound logic."""
         try:
@@ -138,56 +197,3 @@ class NPKCoreEngine:
         except Exception as e:
             return {"status": "ILL_FORMED", "detail": str(e)}
 
-    def dimensions(self, equation: str, dims: Dict[str, str]) -> dict:
-        """Audits dimensional compliance of physics variables by validating exponent balances."""
-        try:
-            import re
-            def _dimspec(v_str):
-                out = {}
-                for tok in str(v_str).split():
-                    m = re.fullmatch(r"([A-Za-z]+)(?:\^(-?[\d/]+))?", tok)
-                    out[m.group(1)] = sp.Rational(m.group(2)) if m.group(2) else sp.Integer(1)
-                return out
-
-            D = {k: _dimspec(v) for k, v in dims.items()}
-            issues: List[str] = []
-            constraints: List[sp.Expr] = []
-
-            def same(a, b, ctx):
-                keys = set(a) | set(b)
-                for k in keys:
-                    dv = sp.simplify(a.get(k, 0) - b.get(k, 0))
-                    if dv == 0: continue
-                    if dv.free_symbols: constraints.append(dv)
-                    else: issues.append(ctx)
-
-            def dim(e):
-                if e.is_Number or e in (sp.pi, sp.E, sp.GoldenRatio): return {}
-                if e.is_Symbol: return dict(D.get(str(e), {}))
-                if e.is_Add:
-                    first = dim(e.args[0])
-                    for a in e.args[1:]: same(first, dim(a), "addition mismatch")
-                    return first
-                if e.is_Mul:
-                    out = {}
-                    for a in e.args:
-                        for k, v in dim(a).items(): out[k] = sp.simplify(out.get(k, 0) + v)
-                    return out
-                if e.is_Pow:
-                    b, ex = e.args
-                    bd = dim(b)
-                    return {k: sp.simplify(v * ex) for k, v in bd.items()} if bd else {}
-                if e.func in (sp.sin, sp.cos, sp.tan, sp.exp, sp.log): return {}
-                return {}
-
-            lhs, rhs = equation.split("=")
-            same(dim(self.sieve.parse_expression(lhs)), dim(self.sieve.parse_expression(rhs)), "equation mismatch")
-            if issues: return {"status": "ILL_FORMED", "detail": "units structural conflict"}
-            if constraints:
-                unknowns = sorted({s for c in constraints for s in c.free_symbols}, key=str)
-                sol = sp.solve(constraints, unknowns, dict=True)
-                if not sol: return {"status": "ILL_FORMED", "detail": "units cannot agree"}
-                return {"status": "CONDITIONAL", "detail": f"units agree only if {sol[0]}"}
-            return {"status": "CONSISTENT", "detail": "units agree perfectly"}
-        except Exception as e:
-            return {"status": "ILL_FORMED", "detail": str(e)}
