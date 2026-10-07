@@ -32,10 +32,11 @@ class NPKCoreEngine:
             self.ledger.record_verdict(False)
             return False
 
-    def evaluate_high_precision_numeric(self, expression_str: str) -> float:
+        def evaluate_high_precision_numeric(self, expression_str: str) -> str:
         """Evaluates an explicit string expression down to high-precision digits."""
         try:
-        return str(mpmath.mpmathify(expression_str)
+            value = sympy.N(sympy.sympify(expression_str), mpmath.mp.dps)
+            return str(value)
         except Exception as e:
             raise ValueError(f"Failed numeric evaluation: {str(e)}")
             
