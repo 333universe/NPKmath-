@@ -7,28 +7,24 @@ from npkmath.core import NPKCoreEngine
 
 def test_production_identity_proved():
     engine = NPKCoreEngine()
-    # Verifies standard algebraic identity proved exactly
     res = engine.identity("sin(x)**2 + cos(x)**2", "1")
     assert res["status"] == "PROVED"
 
 def test_production_identity_refuted():
     engine = NPKCoreEngine()
-    # Verifies failing algebraic statement gets caught and refuted
     res = engine.identity("x + 1", "x + 2")
     assert res["status"] == "REFUTED"
 
 def test_production_value_verification():
     engine = NPKCoreEngine()
-    # Verifies decimal value approximation matching to decimal points
     res = engine.value("pi", "3.14159")
     assert res["status"] == "VERIFIED"
 
 def test_production_exceeds_bounds():
     engine = NPKCoreEngine()
-    # Verifies that interval checking refutes an impossible bound condition
     res = engine.exceeds("sin(x)", "x", 0, 1, "2.0")
     assert res["status"] == "REFUTED"
-    ```python
+
 def test_matrix_equality_proved():
     engine = NPKCoreEngine()
     mat_a = [["1", "x"], ["0", "1"]]
@@ -38,14 +34,14 @@ def test_matrix_equality_proved():
 
 def test_matrix_invertible_proved():
     engine = NPKCoreEngine()
-    # Matrix with a non-zero determinant (1*1 - 0*0 = 1)
     mat = [["1", "0"], ["0", "1"]]
     res = engine.matrix_verify(mat, [], "invertible")
     assert res["status"] == "PROVED"
 
 def test_matrix_rank_evaluation():
     engine = NPKCoreEngine()
-    mat = [["1", "2"], ["2", "4"]]  # Linearly dependent rows -> Rank should be 1
+    mat = [["1", "2"], ["2", "4"]]
     res = engine.matrix_verify(mat, [], "rank")
     assert res["status"] == "VERIFIED"
     assert "1" in res["detail"]
+    
