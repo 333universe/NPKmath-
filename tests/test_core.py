@@ -28,4 +28,24 @@ def test_production_exceeds_bounds():
     # Verifies that interval checking refutes an impossible bound condition
     res = engine.exceeds("sin(x)", "x", 0, 1, "2.0")
     assert res["status"] == "REFUTED"
-    
+    ```python
+def test_matrix_equality_proved():
+    engine = NPKCoreEngine()
+    mat_a = [["1", "x"], ["0", "1"]]
+    mat_b = [["1", "x"], ["0", "1"]]
+    res = engine.matrix_verify(mat_a, mat_b, "equality")
+    assert res["status"] == "PROVED"
+
+def test_matrix_invertible_proved():
+    engine = NPKCoreEngine()
+    # Matrix with a non-zero determinant (1*1 - 0*0 = 1)
+    mat = [["1", "0"], ["0", "1"]]
+    res = engine.matrix_verify(mat, [], "invertible")
+    assert res["status"] == "PROVED"
+
+def test_matrix_rank_evaluation():
+    engine = NPKCoreEngine()
+    mat = [["1", "2"], ["2", "4"]]  # Linearly dependent rows -> Rank should be 1
+    res = engine.matrix_verify(mat, [], "rank")
+    assert res["status"] == "VERIFIED"
+    assert "1" in res["detail"]
