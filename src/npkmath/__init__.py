@@ -20,5 +20,3 @@ __all__ = [
     "AIFeedbackInterface",
     "SignalRanker",
 ]
-
-__all__ = ["NPKAutonomousAgent", "NPKCoreEngine", "SourceLedger", "GoldenSieve"]
