@@ -11,6 +11,7 @@ from typing import Dict, Tuple, Optional, List, Any
 from .sieve import GoldenSieve
 from .ledger import SourceLedger
 
+
 class NPKCoreEngine:
     def __init__(self, precision: int = 120):
         # Configure global high-precision arithmetic thresholds
@@ -27,6 +28,15 @@ class NPKCoreEngine:
             return bool(sp.simplify(L - R) == 0)
         except Exception:
             return False
+
+    def evaluate_high_precision_numeric(self, expr: str) -> float:
+        """Evaluate a numeric expression and return a high-precision float."""
+        try:
+            parsed = self.sieve.parse_expression(expr)
+            with mp.workdps(max(50, 80)):
+                return float(sp.N(parsed, 50))
+        except Exception as exc:
+            raise ValueError(f"Unable to evaluate expression: {expr}") from exc
 
     # ------------------------------------------------------------- Matrix Operations
     def matrix_verify(self, matrix_a: List[List[str]], matrix_b: List[List[str]], operation: str) -> dict:
@@ -196,4 +206,3 @@ class NPKCoreEngine:
             return {"status": "REFUTED", "detail": "bounded successfully everywhere"}
         except Exception as e:
             return {"status": "ILL_FORMED", "detail": str(e)}
-
